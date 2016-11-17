@@ -1,0 +1,238 @@
+%!TEX program = xelatex
+\input{./env.tex}
+\makeatletter
+\def\input@path{{./fig/}}
+\makeatother
+\graphicspath{{./fig/}}
+
+\title{Linux network namespaces}
+\author[Власов Святослав]{
+    Власов Святослав
+}
+\institute{CПбАУ}
+% \date{20 мая 2016 г.}
+
+\begin{document}
+\maketitle
+
+\begin{frame}{Содержание}
+\begin{large}
+\begin{enumerate}
+	\item \hyperlink{namespaces_overview}{Напоминание о namespaces}
+	\item \hyperlink{net_ns_usage}{Использование NET NS}
+    \item \hyperlink{net_ns_features}{Особенности NET NS}
+	\item \hyperlink{pid_ns_usage}{Использование PID NS}
+	\item \hyperlink{ns_internals}{Namespaces внутри}
+	\item \hyperlink{uts_ns_inter}{Устройство UTS NS}
+	\item \hyperlink{pid_ns_inter}{Устройство PID NS}
+\end{enumerate}
+\end{large}
+\end{frame}
+
+\begin{frame}[label={namespaces_overview}]
+\frametitle{Namespaces}
+\begin{tabular}{lp{9cm}}
+	\alert{User} & Изоляция ID пользователя, ID группы \\
+	\alert{PID} & Изоляция ID процесса \\
+	\alert{UTS} & Изоляция Hostname и доменного имени NIS \\
+    \alert{\textbf{Network}} & \textbf{Изоляция сетевого стека: таблица маршрутизации, firewall rules, сетевые устройства, порты} \\
+	\alert{IPC} & Изоляция объектов межпроцессного взаимодействия: семафоры (sem), очереди сообщений (msg), общая память (shm) \\
+	\alert{Mount} & Изоляция точек монтирования \\
+	\alert{Cgroup} & Изоляция иерархии cgroup \\
+	... & 
+\end{tabular}
+\end{frame}
+
+\begin{frame}[label={net_ns_usage}]
+\frametitle{Чем является NET NS?}
+    \alert{Network Namespace} \textemdash{} логически это копия сетевого стека со своими правилами маршрутизации, firewall-rules и сетевыми устройствами. Позволяет внутри каждого NET NS видеть отдельный изолированный набор сетевых устройств, даже loopback.
+\end{frame}
+
+\begin{frame}[fragile]
+    \begin{figure}
+    \centering
+    \includegraphics[scale=0.46]{net_ns.jpg}
+    \end{figure}
+\end{frame}
+
+\begin{frame}[label={net_ns_features}]
+\frametitle{Особенности NET NS}
+\begin{itemize}
+    \item Каждое сетевое устройство может принадлежать только одному сетевому неймспейсу,
+    \item Каждый сокет может принадлежать только одному сетевому неймспейсу,
+    \item Физические устройства принадлежат только корневому неймспейсу
+    \item Для маршрутизации между неймспейсами используется механизм \alert{виртуальных сетевых устройств (veth)}
+    \item В отличие от других неймспейсов, сетевые неймспейсы требуют явного освобождения и могут "переживать" использующие их процессы.
+\end{itemize}
+\end{frame}
+
+\begin{frame}[fragile, label={net_ns_create}]
+\frametitle{Создание неймспейсов}
+\begin{block}{}
+\begin{lstlisting}[language=bash, basicstyle={\fontsize{8}{8}\ttfamily}]
+# ip netns add netns1
+\end{lstlisting}
+    Эта команда создает новый сетевой неймспейс \alert{netns1}. Помимо этого также создается маунт соответствующий неймспейсу в директории \texttt{/var/run/netns}. 
+    
+    Команда \texttt{ip netns exec} позволяет запускать команды внутри сетевых неймспейсов:
+\begin{lstlisting}[language=bash, basicstyle={\fontsize{8}{8}\ttfamily}]
+# ip netns exec netns1 ip link list
+1: lo: <LOOPBACK> mtu 65536 qdisc noop state DOWN mode DEFAULT 
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+# ip netns exec netns1 ping 127.0.0.1
+connect: Network is unreachable
+# ip netns exec netns1 ip link set dev lo up
+# ip netns exec netns1 ping 127.0.0.1
+PING 127.0.0.1 (127.0.0.1) 56(84) bytes of data.
+64 bytes from 127.0.0.1: icmp_seq=1 ttl=64 time=0.051 ms
+\end{lstlisting}
+\end{block}
+
+\end{frame}
+
+\begin{frame}[fragile, label={net_ns_delete}]
+\frametitle{Освобождение неймспейсов}
+\begin{block}{}
+\begin{lstlisting}[language=bash, basicstyle={\fontsize{8}{8}\ttfamily}]
+# ip netns del netns1
+\end{lstlisting}
+\begin{itemize}
+    \item Отмонтирует \texttt{/var/run/netns/netns1}
+    \item Неймспейс не будет освобожден, если он используется хотя бы одним процессом
+    \item "Мигрируемые"{} устройства будут перемещены в сетевой неймспейс по умолчанию
+    \item "Неперемещаемые"{} устройства (имеющие флаг \texttt{NETIF\_F\_NETNS\_LOCAL} в свойствах) будут уничтожены
+    \item Примеры неперемещаемых устройств: loopback, ppp, bridge.
+\end{itemize}
+\end{block}
+\end{frame}
+
+\begin{frame}[fragile, label={ns_net_example}]
+\frametitle{Пример}
+\begin{block}{}
+\begin{lstlisting}[language=bash, basicstyle={\fontsize{6}{6}\ttfamily}]
+# modprobe dummy 
+# ip addr add 192.168.100.199/24 brd + dev dummy0 
+# ip link set dev dummy0 up 
+# ifconfig | grep dummy
+dummy0  Link encap:Ethernet  HWaddr fa:62:00:cd:d0:c2
+# ip link set dummy0 netns netns1 
+# ifconfig | grep dummy
+# ip netns exec netns1 bash
+# ifconfig
+dummy0    Link encap:Ethernet  HWaddr fa:62:00:cd:d0:c2  
+          inet addr:192.168.100.199  Bcast:192.168.100.255  Mask:255.255.255.0
+          ...
+# mkdir -p /etc/netns/netns1
+# echo '192.168.100.199 dummy.com' > /etc/netns/netns1/hosts
+# ping dummy.com
+PING dummy.com (192.168.100.199) 56(84) bytes of data.
+64 bytes from dummy.com (192.168.100.199): icmp_seq=1 ttl=64 time=0.046 ms
+64 bytes from dummy.com (192.168.100.199): icmp_seq=2 ttl=64 time=0.042 ms
+\end{lstlisting}
+\end{block}
+\end{frame}
+
+\begin{frame}[fragile, label={ns_net_veth}]
+\frametitle{Виртуальный сетевой интерфейс}
+\begin{block}{}
+     Взаимодействовать между сетевыми неймспейсами позволяет механизм \alert{виртуальных сетевых интерфейсов (veth)}. Виртуальный сетевой интерфейс напоминает pipe: это пара сетевых интерфейсов связанных друг с другом и находящихся в разных неймспейсах. 
+
+    Создать veth можно следующей командой:
+    \begin{lstlisting}[language=bash, basicstyle={\fontsize{8}{8}\ttfamily}]
+# ip link add name veth0 type veth peer name veth1 netns <pid>
+\end{lstlisting}
+    где \texttt{veth0} и \texttt{veth1} \textemdash{} имена сетевых интерфейсов, а \texttt{<pid>} \textemdash{} индентификатор процесса в дочернем сетевом немспейсе.
+\end{block}
+\end{frame}
+
+\begin{frame}[fragile, label={ns_net_under_hood}]
+\frametitle{Под капотом}
+    \begin{block}{}
+    В ядре сетевой неймспейс представлен структурой \texttt{struct net} объявленной в \texttt{include/net/net\_namespace.h}. В структуре \texttt{struct net\_device} имеется указатель на неймспейс к которому данное сетевое устройство принадлежит.
+\begin{lstlisting}[title=\href{http://lxr.free-electrons.com/source/include/linux/netdevice.h}{netdevice.h}]
+struct net_device {
+    ...
+    net* nd_net;
+    ...
+}
+\end{lstlisting}
+    С помощью функций \texttt{struct net* dev\_net(const struct net\_device *dev)} и \texttt{void dev\_net\_set(struct net\_device *dev, struct net *net)} можно получить доступ к немспейсу данного сетевого устройства.
+\end{block}
+\end{frame}
+
+
+\begin{frame}[fragile]
+\frametitle{Под капотом}
+    \begin{block}{}
+    В структуре \texttt{struct sock} также имеется поле \texttt{struct net* sk\_net} а также функции \texttt{sock\_net} и \texttt{sock\_net\_set} для доступа к неймспейсу сокета соответственно.
+
+    Все имеющиеся неймспейсы связаны в список \texttt{extern struct list\_head net\_namespace\_list;}, а макрос \texttt{for\_each\_net()} позволяет проходить в цикле по ним.
+
+    Сетевой неймспейс по умолчанию представлен структурой \texttt{extern struct net init\_net;} включающий в себя loopback и все физические сетевые устройства. 
+\end{block}
+\end{frame}
+
+\begin{frame}[fragile]
+\frametitle{Под капотом}
+\begin{block}{}
+    \begin{lstlisting}[title=\href{https://github.com/shemminger/iproute2/blob/master/ip/ipnetns.c}{ipnetns.c}, language=c, basicstyle={\fontsize{6}{6}\ttfamily}]
+    /* Create the base netns directory if it doesn't exist */
+	mkdir(NETNS_RUN_DIR, S_IRWXU|S_IRGRP|S_IXGRP|S_IROTH|S_IXOTH);
+	/* Create the filesystem state */
+	fd = open(netns_path, O_RDONLY|O_CREAT|O_EXCL, 0);
+	if (fd < 0) {
+		...	
+    }
+	close(fd);
+	if (unshare(CLONE_NEWNET) < 0) {
+		...	
+    }
+
+	/* Bind the netns last so I can watch for it */
+	if (mount("/proc/self/ns/net", netns_path, "none", MS_BIND, NULL) < 0) {
+		...
+    }
+	return 0;
+\end{lstlisting}
+\end{block}
+\end{frame}
+
+\begin{frame}[fragile, label={}]
+\frametitle{Под капотом}
+\begin{block}{}
+    \begin{lstlisting}[language=c, basicstyle={\fontsize{6}{6}\ttfamily}]
+static void __net_exit default_device_exit(struct net *net)
+{
+        struct net_device *dev, *aux;
+        /*
+         * Push all migratable network devices back to the
+         * initial network namespace
+         */
+        rtnl_lock();
+        for_each_netdev_safe(net, dev, aux) {
+                int err;
+                char fb_name[IFNAMSIZ];
+
+                /* Ignore unmoveable devices (i.e. loopback) */
+                if (dev->features & NETIF_F_NETNS_LOCAL)
+                        continue;
+
+                /* Leave virtual devices for the generic cleanup */
+                if (dev->rtnl_link_ops)
+                        continue;
+
+                /* Push remaining network devices to init_net */
+                snprintf(fb_name, IFNAMSIZ, "dev%d", dev->ifindex);
+                err = dev_change_net_namespace(dev, &init_net, fb_name);
+                if (err) {
+                        ...
+                }
+        }
+        rtnl_unlock();
+}
+\end{lstlisting}
+\end{block}
+\end{frame}
+
+
+\end{document}
