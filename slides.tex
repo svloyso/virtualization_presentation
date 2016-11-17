@@ -162,13 +162,12 @@ struct net_device {
 
 \begin{frame}[fragile]
 \frametitle{Под капотом}
-    \begin{block}{}
     В структуре \texttt{struct sock} также имеется поле \texttt{struct net* sk\_net} а также функции \texttt{sock\_net} и \texttt{sock\_net\_set} для доступа к неймспейсу сокета соответственно.
 
     Все имеющиеся неймспейсы связаны в список \texttt{extern struct list\_head net\_namespace\_list;}, а макрос \texttt{for\_each\_net()} позволяет проходить в цикле по ним.
 
     Сетевой неймспейс по умолчанию представлен структурой \texttt{extern struct net init\_net;} включающий в себя loopback и все физические сетевые устройства. 
-\end{block}
+
 \end{frame}
 
 \begin{frame}[fragile]
@@ -233,5 +232,14 @@ static void __net_exit default_device_exit(struct net *net)
 \end{block}
 \end{frame}
 
+
+\begin{frame}
+\frametitle{Материалы}
+    \begin{itemize}
+        \item \href{http://www.haifux.org/lectures/299/netLec7.pdf}{http://www.haifux.org/lectures/299/netLec7.pdf}
+        \item \href{https://www.toptal.com/linux/separation-anxiety-isolating-your-system-with-linux-namespaces}{https://www.toptal.com/linux/separation-anxiety-isolating-your-system-with-linux-namespaces}
+        \item \href{http://lwn.net/Articles/580893/}{http://lwn.net/Articles/580893/}
+    \end{itemize}
+\end{frame}
 
 \end{document}
